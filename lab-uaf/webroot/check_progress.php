@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json');
 $sid = $_GET['sid'] ?? '';
-if (!$sid || !preg_match('/^[a-f0-9]{32}$/', $sid)) {
+if (!$sid || !preg_match('/^[a-zA-Z0-9,-]{1,256}$/', $sid)) {
     echo json_encode([]);
     exit;
 }

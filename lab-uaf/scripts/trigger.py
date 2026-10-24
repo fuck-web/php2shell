@@ -96,7 +96,7 @@ def main():
     print("=" * 60)
 
     for run in range(1, a.runs + 1):
-        sid = f"php2shell{uuid.uuid4().hex[:20]}"
+        sid = uuid.uuid4().hex
         print(f"\n--- Run {run}/{a.runs} | SID: {sid}")
 
         phase1, phase2, boundary = build_trigger(sid)
