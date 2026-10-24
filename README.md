@@ -124,6 +124,8 @@ python3 scripts/php2shell_poc.py --monitor --rounds 10 --spray 16
 
 Full exploit chain with multiple fallback paths. Requires a PHP web application running a vulnerable PHP version.
 
+![RCE demo](docs/rce_demo.png)
+
 ### Usage
 
 ```bash
